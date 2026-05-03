@@ -1,0 +1,117 @@
+---
+title: Moss
+sidebarTitle: Moss
+---
+
+In this section, we present how to connect Moss to MindsDB.
+
+[Moss](https://moss.dev) is a semantic search runtime for Conversational AI agents. It delivers hybrid search with sub-10ms latency.
+
+## Prerequisites
+
+Before proceeding, ensure the following prerequisites are met:
+
+1. Install MindsDB locally via [Docker](/setup/self-hosted/docker) or [Docker Desktop](/setup/self-hosted/docker-desktop).
+2. To connect Moss to MindsDB, install the required dependencies following [this instruction](/setup/self-hosted/docker#install-dependencies).
+3. Create a Moss account and obtain your project credentials from [portal.usemoss.dev](https://portal.usemoss.dev).
+
+## Connection
+
+This handler is implemented using the `moss` Python library.
+
+To connect Moss to MindsDB, use the following statement:
+
+```sql
+CREATE DATABASE moss_db
+WITH ENGINE = 'moss',
+PARAMETERS = {
+    "project_id": "your-project-id",
+    "project_key": "moss_access_key_xxxxx",
+    "alpha": "0.8"
+};
+```
+
+The required parameters are:
+
+- `project_id`: Your Moss project ID, available from [portal.usemoss.dev](https://portal.usemoss.dev).
+- `project_key`: Your Moss project key (secret), available from [portal.usemoss.dev](https://portal.usemoss.dev).
+
+The optional parameters are:
+
+- `alpha`: Hybrid search weight between `0.0` (keyword-only) and `1.0` (semantic-only). Defaults to `0.8`.
+
+## Usage
+
+### Inserting documents
+
+Insert documents to create a new index. The index is built asynchronously — MindsDB waits until it is ready before returning (typically 5–30 seconds).
+
+```sql
+INSERT INTO moss_db.my_index (id, content, metadata)
+VALUES
+    ('doc-1', 'MindsDB unifies AI and data with SQL', '{"category": "mindsdb"}'),
+    ('doc-2', 'Moss delivers sub-10ms hybrid semantic search', '{"category": "moss"}'),
+    ('doc-3', 'RAG pipelines combine retrieval and generation', '{"category": "rag"}');
+```
+
+<Note>
+  The `id` column is optional. If omitted, Moss generates a unique ID
+  automatically using a hash of the document content.
+</Note>
+
+Inserting into an existing index upserts the documents:
+
+```sql
+INSERT INTO moss_db.my_index (id, content, metadata)
+VALUES ('doc-4', 'Vector databases store embeddings for similarity search', '{"category": "vectordb"}');
+```
+
+### Semantic search
+
+Query your index using natural language. Results are ranked by relevance and include a `distance` column (lower = better match):
+
+```sql
+SELECT id, content, distance
+FROM moss_db.my_index
+WHERE content = 'how do I build a RAG pipeline?'
+LIMIT 5;
+```
+
+### Fetch all documents
+
+```sql
+SELECT id, content, metadata
+FROM moss_db.my_index;
+```
+
+### Fetch by ID
+
+```sql
+SELECT id, content
+FROM moss_db.my_index
+WHERE id = 'doc-1';
+```
+
+### Semantic search with metadata filter
+
+Combine a semantic search query with a metadata filter:
+
+```sql
+SELECT id, content, distance
+FROM moss_db.my_index
+WHERE content = 'semantic search performance'
+  AND metadata.category = 'moss'
+LIMIT 3;
+```
+
+### Delete a document
+
+```sql
+DELETE FROM moss_db.my_index WHERE id = 'doc-1';
+```
+
+### Drop an index
+
+```sql
+DROP TABLE moss_db.my_index;
+```
