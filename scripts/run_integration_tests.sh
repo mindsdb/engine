@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
 # Local Integration Test Runner for macOS
-# Replicates the GitHub Actions workflow from .github/workflows/tests_integration.yml
 #
 # Usage:
 #   ./run_integration_tests.sh                    # Run all integration tests (slow)
