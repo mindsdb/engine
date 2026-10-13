@@ -130,6 +130,71 @@ class TestPostgresHandler(BaseDatabaseHandlerTest, unittest.TestCase):
         assert isinstance(data, OkResponse)
         self.assertEqual(data.affected_rows, 1)
 
+    def test_native_query_stream_falls_back_to_client_side_when_cursor_is_not_allowed(self):
+        """
+        Tests that statements rejected by 'DECLARE ... CURSOR FOR' are executed with a client side cursor
+        """
+        with_update_error = psycopg.errors.FeatureNotSupported(
+            "DECLARE CURSOR must not contain data-modifying statements in WITH"
+        )
+        cases = [
+            ("UPDATE table SET a = 1", ExecStatus.COMMAND_OK, None),
+            ("DELETE FROM table", ExecStatus.COMMAND_OK, None),
+            ("CREATE TABLE table (a int)", ExecStatus.COMMAND_OK, None),
+            ("ALTER TABLE table ADD COLUMN b int", ExecStatus.COMMAND_OK, None),
+            ("TRUNCATE table", ExecStatus.COMMAND_OK, None),
+            ("SHOW search_path", ExecStatus.TUPLES_OK, None),
+            ("EXPLAIN SELECT 1", ExecStatus.TUPLES_OK, None),
+            ("WITH x AS (UPDATE table SET a = 1 RETURNING a) SELECT * FROM x", ExecStatus.TUPLES_OK, with_update_error),
+        ]
+        for query_str, status, server_error in cases:
+            with self.subTest(query=query_str):
+                mock_conn = MagicMock()
+                mock_cursor_server = MockCursorContextManager()
+                mock_cursor_client = MockCursorContextManager()
+                self.handler.connect = MagicMock(return_value=mock_conn)
+                mock_conn.cursor = MagicMock(side_effect=[mock_cursor_server, mock_cursor_client])
+
+                if server_error is None:
+                    keyword = query_str.split()[0]
+                    server_error = psycopg.errors.SyntaxError(f'syntax error at or near "{keyword}"')
+                mock_cursor_server.execute.side_effect = server_error
+                mock_cursor_client.pgresult = MagicMock(status=status)
+                mock_cursor_client.rowcount = 1
+                mock_cursor_client.description = [ColumnDescription(name="a", type_code=regtype_to_oid["text"])]
+                mock_cursor_client.fetchall = MagicMock(return_value=[["value"]])
+
+                data = self.handler.native_query(query_str, stream=True)
+
+                self.assertIn("name", mock_conn.cursor.call_args_list[0].kwargs)
+                mock_cursor_server.execute.assert_called_once_with(query_str)
+                mock_conn.rollback.assert_called_once()
+                mock_cursor_client.execute.assert_called_once_with(query_str)
+                if status == ExecStatus.COMMAND_OK:
+                    self.assertIsInstance(data, OkResponse)
+                    self.assertEqual(data.affected_rows, 1)
+                else:
+                    self.assertIsInstance(data, TableResponse)
+                    self.assertEqual(data.data_frame["a"].tolist(), ["value"])
+
+    def test_native_query_stream_does_not_retry_on_other_errors(self):
+        """
+        Tests that errors not caused by the server-side cursor are returned without running the query again
+        """
+        mock_conn = MagicMock()
+        mock_cursor = MockCursorContextManager()
+        self.handler.connect = MagicMock(return_value=mock_conn)
+        mock_conn.cursor = MagicMock(return_value=mock_cursor)
+        mock_cursor.execute.side_effect = psycopg.errors.UndefinedTable('relation "missing" does not exist')
+
+        query_str = "SELECT * FROM missing"
+        data = self.handler.native_query(query_str, stream=True)
+
+        mock_conn.cursor.assert_called_once()
+        mock_cursor.execute.assert_called_once_with(query_str)
+        self.assertIsInstance(data, ErrorResponse)
+        self.assertEqual(data.error_message, 'relation "missing" does not exist')
+
     def test_native_query_command_ok_no_stream(self):
         """
         Tests the `native_query` at client side execution
@@ -212,6 +277,7 @@ class TestPostgresHandler(BaseDatabaseHandlerTest, unittest.TestCase):
 
         query_str = "SELECT * FROM table"
         data = self.handler.native_query(query_str, stream=True)
+        mock_conn.cursor.assert_called_once_with(name=f"mindsdb_{id(self.handler)}")
         mock_cursor.execute.assert_called_once_with(query_str)
 
         # Verify the response
