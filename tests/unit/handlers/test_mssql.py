@@ -193,11 +193,33 @@ class TestMSSQLHandler(BaseDatabaseHandlerTest, unittest.TestCase):
         call_args = self.handler.native_query.call_args[0][0]
         database = self.handler.connection_args["database"]
 
-        self.assertIn(f"{database}.INFORMATION_SCHEMA.TABLES", call_args)
+        self.assertIn(f"[{database}].INFORMATION_SCHEMA.TABLES", call_args)
         self.assertIn("table_schema", call_args)
         self.assertIn("table_name", call_args)
         self.assertIn("table_type", call_args)
         self.assertEqual(response, expected_response)
+
+    def test_database_name_is_bracket_quoted(self):
+        """
+        Tests that the database name is bracket-quoted in catalog queries, so names with '-' or ']' work
+        """
+        self.handler.database = "sqldb-prod]eastus"
+        self.handler.native_query = MagicMock(return_value=OkResponse())
+
+        for method in (
+            self.handler.get_tables,
+            self.handler.meta_get_tables,
+            self.handler.meta_get_columns,
+            self.handler.meta_get_column_statistics,
+            self.handler.meta_get_primary_keys,
+            self.handler.meta_get_foreign_keys,
+        ):
+            with self.subTest(method=method.__name__):
+                self.handler.native_query.reset_mock()
+                method()
+                query = self.handler.native_query.call_args[0][0]
+                self.assertIn("[sqldb-prod]]eastus].", query)
+                self.assertEqual(query.count("[sqldb-prod]]eastus]."), query.count("sqldb-prod"))
 
     def test_get_columns(self):
         """
