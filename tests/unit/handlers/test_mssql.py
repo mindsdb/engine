@@ -998,6 +998,33 @@ class TestMSSQLHandlerODBC(unittest.TestCase):
             if "pyodbc" in sys.modules:
                 del sys.modules["pyodbc"]
 
+    def test_odbc_connection_string_escapes_special_characters(self):
+        """Test that values with ';', '{', '}' or edge spaces can't split the ODBC connection string"""
+        mock_pyodbc = MagicMock()
+        mock_connect = MagicMock()
+        mock_pyodbc.connect = mock_connect
+
+        sys.modules["pyodbc"] = mock_pyodbc
+
+        connection_data = self.connection_data.copy()
+        connection_data["password"] = "Xy;9}Encrypt=no"
+        connection_data["user"] = "{admin"
+        connection_data["database"] = " sales "
+        connection_data["encrypt"] = "yes"
+
+        try:
+            handler = SqlServerHandler("mssql_odbc", connection_data=connection_data)
+            handler.connect()
+            conn_str = mock_connect.call_args[0][0]
+            self.assertEqual(
+                conn_str,
+                "DRIVER={ODBC Driver 18 for SQL Server};SERVER=127.0.0.1,1433;DATABASE={ sales };"
+                "UID={{admin};PWD={Xy;9}}Encrypt=no};Encrypt=yes",
+            )
+        finally:
+            if "pyodbc" in sys.modules:
+                del sys.modules["pyodbc"]
+
     def test_odbc_connection_with_encryption_params(self):
         """Test that encryption parameters are added to connection string"""
         mock_pyodbc = MagicMock()
