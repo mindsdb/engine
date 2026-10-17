@@ -1,5 +1,6 @@
 from typing import Any, Union, TYPE_CHECKING
 import datetime
+import decimal
 
 import pymssql
 from pymssql import OperationalError
@@ -59,6 +60,38 @@ def _map_type(mssql_type_text: str) -> MYSQL_DATA_TYPE:
     return MYSQL_DATA_TYPE.VARCHAR
 
 
+# pyodbc reports the Python type of each column in cursor.description[1]
+_ODBC_PYTHON_TYPES = {
+    bool: MYSQL_DATA_TYPE.TINYINT,
+    int: MYSQL_DATA_TYPE.INT,
+    float: MYSQL_DATA_TYPE.FLOAT,
+    decimal.Decimal: MYSQL_DATA_TYPE.DECIMAL,
+    datetime.datetime: MYSQL_DATA_TYPE.DATETIME,
+    datetime.date: MYSQL_DATA_TYPE.DATE,
+    datetime.time: MYSQL_DATA_TYPE.TIME,
+    str: MYSQL_DATA_TYPE.TEXT,
+    bytes: MYSQL_DATA_TYPE.BINARY,
+    bytearray: MYSQL_DATA_TYPE.BINARY,
+}
+
+
+def _nullable_dtype(values: list[Any]) -> str | None:
+    """Pick a pandas nullable dtype for integer or bit values, so NULLs don't turn the column into float or object.
+
+    Args:
+        values (list[Any]): the values of one column.
+
+    Returns:
+        str | None: 'Int64' or 'boolean' if all non-NULL values are int or bool, otherwise None.
+    """
+    value_types = {type(value) for value in values if value is not None}
+    if value_types == {int}:
+        return "Int64"
+    if value_types == {bool}:
+        return "boolean"
+    return None
+
+
 def _make_table_response(
     result: list[Union[dict[str, Any], tuple]], cursor: Union[pymssql.Cursor, "pyodbc.Cursor"], use_odbc: bool = False
 ) -> Response:
@@ -85,13 +118,27 @@ def _make_table_response(
         # pymssql with as_dict=True returns list of dicts
         data_frame = pd.DataFrame(result)
 
-    for column in description:
+    for column_index, column in enumerate(description):
         column_name = column[0]
         column_type = column[1]
         column_dtype = data_frame[column_name].dtype
 
-        if use_odbc:
-            # For pyodbc, use type inference based on pandas dtype
+        if (
+            result
+            and column_type in (pymssql.NUMBER, int, bool)
+            and not (pd_types.is_integer_dtype(column_dtype) or pd_types.is_bool_dtype(column_dtype))
+        ):
+            key = column_index if use_odbc else column_name
+            values = [row[key] for row in result]
+            nullable_dtype = _nullable_dtype(values)
+            if nullable_dtype is not None:
+                data_frame[column_name] = pd.array(values, dtype=nullable_dtype)
+                column_dtype = data_frame[column_name].dtype
+
+        if use_odbc and column_type in _ODBC_PYTHON_TYPES:
+            mysql_types.append(_ODBC_PYTHON_TYPES[column_type])
+        elif use_odbc:
+            # Fall back to type inference based on pandas dtype
             if pd_types.is_integer_dtype(column_dtype):
                 mysql_types.append(MYSQL_DATA_TYPE.INT)
             elif pd_types.is_float_dtype(column_dtype):

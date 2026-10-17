@@ -932,6 +932,43 @@ class TestMSSQLHandler(BaseDatabaseHandlerTest, unittest.TestCase):
             self.assertEqual(result_value, input_value)
         # endregion
 
+    def test_types_casting_with_nulls(self):
+        """Test that NULLs in integer and bit columns don't turn them into float or object"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=None)
+
+        self.handler.connect = MagicMock(return_value=mock_conn)
+        mock_conn.cursor = MagicMock(return_value=mock_cursor)
+
+        mock_cursor.fetchall.return_value = [
+            {"n_bigint": 9007199254740993, "n_int": 3, "n_bit": True, "n_float": 1.5},
+            {"n_bigint": None, "n_int": None, "n_bit": None, "n_float": None},
+        ]
+        mock_cursor.description = [
+            ("n_bigint", 3, None, None, None, None, None),
+            ("n_int", 3, None, None, None, None, None),
+            ("n_bit", 3, None, None, None, None, None),
+            ("n_float", 3, None, None, None, None, None),
+        ]
+
+        response: TableResponse = self.handler.native_query("SELECT * FROM test_table")
+
+        self.assertEqual(
+            [col.type for col in response.columns],
+            [MYSQL_DATA_TYPE.INT, MYSQL_DATA_TYPE.INT, MYSQL_DATA_TYPE.TINYINT, MYSQL_DATA_TYPE.FLOAT],
+        )
+        df = response.data_frame
+        self.assertEqual(df["n_bigint"].dtype, "Int64")
+        self.assertEqual(df["n_bigint"][0], 9007199254740993)
+        self.assertEqual(df["n_int"].dtype, "Int64")
+        self.assertEqual(df["n_int"][0], 3)
+        self.assertEqual(df["n_bit"].dtype, "boolean")
+        self.assertTrue(df["n_bit"][0])
+        self.assertEqual(df["n_float"].dtype, "float64")
+        self.assertTrue(df[["n_bigint", "n_int", "n_bit", "n_float"]].iloc[1].isna().all())
+
 
 class TestMSSQLHandlerODBC(unittest.TestCase):
     """Tests for MSSQL handler with ODBC connection"""
@@ -1181,6 +1218,57 @@ class TestMSSQLHandlerODBC(unittest.TestCase):
             self.assertEqual(response.type, RESPONSE_TYPE.TABLE)
             self.assertIsNotNone(response.columns)
             self.assertTrue(len(response.columns) > 0)
+        finally:
+            if "pyodbc" in sys.modules:
+                del sys.modules["pyodbc"]
+
+    def test_odbc_types_from_cursor_description(self):
+        """Test that ODBC column types come from cursor.description and NULLs don't turn integers into float"""
+        mock_pyodbc = MagicMock()
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=None)
+
+        mock_cursor.fetchall.return_value = [
+            (None, None, None, None, None, None),
+            (9007199254740993, Decimal("10.50"), datetime.date(2026, 1, 2), datetime.time(12, 30), True, "x"),
+        ]
+        mock_cursor.description = [
+            ("n_bigint", int, None, 19, 19, 0, True),
+            ("n_decimal", Decimal, None, 19, 19, 4, True),
+            ("d_date", datetime.date, None, 10, 10, 0, True),
+            ("d_time", datetime.time, None, 16, 16, 7, True),
+            ("n_bit", bool, None, 1, 1, 0, True),
+            ("t_text", str, None, 10, 10, 0, True),
+        ]
+
+        sys.modules["pyodbc"] = mock_pyodbc
+
+        try:
+            handler = SqlServerHandler("mssql_odbc", connection_data=self.connection_data)
+            handler.connect = MagicMock(return_value=mock_conn)
+            handler.is_connected = True
+            mock_conn.cursor = MagicMock(return_value=mock_cursor)
+
+            response = handler.native_query("SELECT * FROM test")
+
+            self.assertEqual(
+                [col.type for col in response.columns],
+                [
+                    MYSQL_DATA_TYPE.INT,
+                    MYSQL_DATA_TYPE.DECIMAL,
+                    MYSQL_DATA_TYPE.DATE,
+                    MYSQL_DATA_TYPE.TIME,
+                    MYSQL_DATA_TYPE.TINYINT,
+                    MYSQL_DATA_TYPE.TEXT,
+                ],
+            )
+            df = response.data_frame
+            self.assertEqual(df["n_bigint"].dtype, "Int64")
+            self.assertEqual(df["n_bigint"][1], 9007199254740993)
+            self.assertEqual(df["n_bit"].dtype, "boolean")
+            self.assertTrue(df.iloc[0].isna().all())
         finally:
             if "pyodbc" in sys.modules:
                 del sys.modules["pyodbc"]
