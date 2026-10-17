@@ -54,6 +54,32 @@ def _validate_identifier(identifier: str) -> str:
     return identifier
 
 
+def _make_data_frame(result: List[Tuple], columns: List[str]) -> pd.DataFrame:
+    """Build a DataFrame from query rows, keeping integer and boolean columns that contain NULLs exact.
+
+    Without this, pandas turns an integer column with a NULL into float64, which loses precision above 2**53.
+
+    Args:
+        result (List[Tuple]): rows returned by the cursor.
+        columns (List[str]): column names.
+
+    Returns:
+        pd.DataFrame: the query result.
+    """
+    data_frame = pd.DataFrame(result, columns=columns)
+    for index in range(len(columns)):
+        dtype = data_frame.dtypes.iloc[index]
+        if pd.api.types.is_integer_dtype(dtype) or pd.api.types.is_bool_dtype(dtype):
+            continue
+        values = [row[index] for row in result]
+        value_types = {type(value) for value in values if value is not None}
+        if value_types == {int}:
+            data_frame.isetitem(index, pd.array(values, dtype="Int64"))
+        elif value_types == {bool}:
+            data_frame.isetitem(index, pd.array(values, dtype="boolean"))
+    return data_frame
+
+
 def _parse_interval_value(value: Any) -> Optional[int]:
     if isinstance(value, bool):
         return None
@@ -407,7 +433,7 @@ class DatabricksHandler(MetaDatabaseHandler):
                 if cursor.description:
                     response = Response(
                         RESPONSE_TYPE.TABLE,
-                        data_frame=pd.DataFrame(result, columns=[x[0] for x in cursor.description]),
+                        data_frame=_make_data_frame(result, [x[0] for x in cursor.description]),
                     )
                 else:
                     response = Response(RESPONSE_TYPE.OK)

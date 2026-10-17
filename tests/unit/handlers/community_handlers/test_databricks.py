@@ -189,6 +189,24 @@ class TestTableOperations(unittest.TestCase):
         self.assertEqual(list(response.data_frame.columns), ["id", "name"])
         self.assertEqual(len(response.data_frame), 0)
 
+    def test_native_query_keeps_integers_with_nulls_exact(self):
+        self.mock_cursor.set_results(
+            [(9007199254740993, 3, True, 1.5), (None, None, None, None)],
+            ["id", "qty", "flag", "price"],
+        )
+
+        response = self.handler.native_query("SELECT id, qty, flag, price FROM orders")
+
+        df = response.data_frame
+        self.assertEqual(df["id"].dtype, "Int64")
+        self.assertEqual(df["id"][0], 9007199254740993)
+        self.assertEqual(df["qty"].dtype, "Int64")
+        self.assertEqual(df["qty"][0], 3)
+        self.assertEqual(df["flag"].dtype, "boolean")
+        self.assertTrue(df["flag"][0])
+        self.assertEqual(df["price"].dtype, "float64")
+        self.assertTrue(df.iloc[1].isna().all())
+
     def test_get_tables(self):
         """
         Tests if the `get_tables` method to confirm it correctly calls `native_query` with the appropriate SQL commands.
