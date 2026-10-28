@@ -17,6 +17,21 @@ from mindsdb.utilities.render.sqlalchemy_render import SqlalchemyRender
 
 
 class TestMysqlRender:
+    def test_not_is_null(self):
+        # NOT must survive rendering of negated IS [NOT] NULL predicates
+        # (regression: a labeled NULL operand made the inversion a no-op)
+        cases = {
+            "SELECT * FROM tb1 WHERE NOT (x IS NULL)": "SELECT * FROM tb1 WHERE x IS NOT NULL",
+            "SELECT * FROM tb1 WHERE NOT x IS NULL": "SELECT * FROM tb1 WHERE x IS NOT NULL",
+            "SELECT * FROM tb1 WHERE NOT (x IS NOT NULL)": "SELECT * FROM tb1 WHERE x IS NULL",
+            "SELECT * FROM tb1 WHERE x IS NULL": "SELECT * FROM tb1 WHERE x IS NULL",
+            "SELECT * FROM tb1 WHERE x IS NOT NULL": "SELECT * FROM tb1 WHERE x IS NOT NULL",
+        }
+        for sql_in, expected in cases.items():
+            query = parse_sql(sql_in)
+            sql = SqlalchemyRender("mysql").get_string(query, with_failback=False)
+            assert sql.replace("\n", "").replace("\t", "") == expected, sql_in
+
     def test_create_table(self):
         query = CreateTable(
             name="tbl1",

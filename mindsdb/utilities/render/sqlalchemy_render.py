@@ -284,6 +284,15 @@ class SqlalchemyRender:
             arg1 = self.to_expression(t.args[1])
 
             op = t.op.lower()
+            if (
+                op in ("is", "is not")
+                and isinstance(t.args[1], ast.Constant)
+                and t.args[1].value is None
+            ):
+                # to_expression wraps constants in a label; with a labeled NULL
+                # operand SQLAlchemy cannot negate the predicate, so NOT (x IS NULL)
+                # lost its NOT. A bare sa.null() keeps is_/is_not invertible.
+                arg1 = sa.null()
             if op in ("in", "not in"):
                 if t.args[1].parentheses:
                     arg1 = [arg1]
