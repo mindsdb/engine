@@ -150,6 +150,24 @@ def _make_table_response(
     return Response(RESPONSE_TYPE.TABLE, data_frame=data_frame, mysql_types=mysql_types)
 
 
+def _odbc_value(value: Any) -> str:
+    """Escape a value for an ODBC connection string.
+
+    A value that contains ';', '{' or '}', or that starts or ends with a space, is wrapped in braces
+    with every '}' doubled, so it can't end the attribute early or add other attributes.
+
+    Args:
+        value (Any): the attribute value.
+
+    Returns:
+        str: the value, safe to use after 'KEY='.
+    """
+    value = str(value)
+    if any(char in value for char in ";{}") or value != value.strip():
+        return "{" + value.replace("}", "}}") + "}"
+    return value
+
+
 class SqlServerHandler(MetaDatabaseHandler):
     """
     This handler handles connection and execution of the Microsoft SQL Server statements.
@@ -252,19 +270,19 @@ class SqlServerHandler(MetaDatabaseHandler):
         password = self.connection_args.get("password")
 
         conn_str_parts = [
-            f"DRIVER={{{driver}}}",
-            f"SERVER={host},{port}",
-            f"DATABASE={database}",
-            f"UID={user}",
-            f"PWD={password}",
+            "DRIVER={" + str(driver).replace("}", "}}") + "}",
+            f"SERVER={_odbc_value(f'{host},{port}')}",
+            f"DATABASE={_odbc_value(database)}",
+            f"UID={_odbc_value(user)}",
+            f"PWD={_odbc_value(password)}",
         ]
 
         # Add optional parameters
         if "encrypt" in self.connection_args:
-            conn_str_parts.append(f"Encrypt={self.connection_args.get('encrypt', 'yes')}")
+            conn_str_parts.append(f"Encrypt={_odbc_value(self.connection_args.get('encrypt', 'yes'))}")
         if "trust_server_certificate" in self.connection_args:
             conn_str_parts.append(
-                f"TrustServerCertificate={self.connection_args.get('trust_server_certificate', 'yes')}"
+                f"TrustServerCertificate={_odbc_value(self.connection_args.get('trust_server_certificate', 'yes'))}"
             )
 
         if "connection_string_args" in self.connection_args:
