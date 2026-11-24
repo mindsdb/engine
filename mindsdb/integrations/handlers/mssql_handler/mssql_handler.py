@@ -181,6 +181,11 @@ class SqlServerHandler(MetaDatabaseHandler):
         if self.is_connected is True:
             self.disconnect()
 
+    @property
+    def _quoted_database(self) -> str:
+        """The database name as a bracket-quoted T-SQL identifier, so names like 'sqldb-prod' work in queries."""
+        return "[" + str(self.database).replace("]", "]]") + "]"
+
     def connect(self):
         """
         Establishes a connection to a Microsoft SQL Server database.
@@ -448,7 +453,7 @@ class SqlServerHandler(MetaDatabaseHandler):
                 table_schema,
                 table_name,
                 table_type
-            FROM {self.database}.INFORMATION_SCHEMA.TABLES
+            FROM {self._quoted_database}.INFORMATION_SCHEMA.TABLES
             WHERE TABLE_TYPE in ('BASE TABLE', 'VIEW')
         """
         if self.schema:
@@ -514,17 +519,17 @@ class SqlServerHandler(MetaDatabaseHandler):
                 t.TABLE_TYPE as table_type,
                 CAST(ep.value AS NVARCHAR(MAX)) as table_description,
                 SUM(p.rows) as row_count
-            FROM {self.database}.INFORMATION_SCHEMA.TABLES t
-            LEFT JOIN {self.database}.sys.tables st 
+            FROM {self._quoted_database}.INFORMATION_SCHEMA.TABLES t
+            LEFT JOIN {self._quoted_database}.sys.tables st 
                 ON t.TABLE_NAME = st.name
-            LEFT JOIN {self.database}.sys.schemas s 
+            LEFT JOIN {self._quoted_database}.sys.schemas s 
                 ON st.schema_id = s.schema_id AND t.TABLE_SCHEMA = s.name
-            LEFT JOIN {self.database}.sys.extended_properties ep 
+            LEFT JOIN {self._quoted_database}.sys.extended_properties ep 
                 ON st.object_id = ep.major_id 
                 AND ep.minor_id = 0 
                 AND ep.class = 1
                 AND ep.name = 'MS_Description'
-            LEFT JOIN {self.database}.sys.partitions p 
+            LEFT JOIN {self._quoted_database}.sys.partitions p 
                 ON st.object_id = p.object_id 
                 AND p.index_id IN (0, 1)
             WHERE t.TABLE_TYPE IN ('BASE TABLE', 'VIEW')
@@ -561,14 +566,14 @@ class SqlServerHandler(MetaDatabaseHandler):
                 CAST(ep.value AS NVARCHAR(MAX)) as column_description,
                 c.COLUMN_DEFAULT as column_default,
                 CASE WHEN c.IS_NULLABLE = 'YES' THEN 1 ELSE 0 END as is_nullable
-            FROM {self.database}.INFORMATION_SCHEMA.COLUMNS c
-            LEFT JOIN {self.database}.sys.tables st 
+            FROM {self._quoted_database}.INFORMATION_SCHEMA.COLUMNS c
+            LEFT JOIN {self._quoted_database}.sys.tables st 
                 ON c.TABLE_NAME = st.name
-            LEFT JOIN {self.database}.sys.schemas s 
+            LEFT JOIN {self._quoted_database}.sys.schemas s 
                 ON st.schema_id = s.schema_id AND c.TABLE_SCHEMA = s.name
-            LEFT JOIN {self.database}.sys.columns sc 
+            LEFT JOIN {self._quoted_database}.sys.columns sc 
                 ON st.object_id = sc.object_id AND c.COLUMN_NAME = sc.name
-            LEFT JOIN {self.database}.sys.extended_properties ep 
+            LEFT JOIN {self._quoted_database}.sys.extended_properties ep 
                 ON st.object_id = ep.major_id 
                 AND sc.column_id = ep.minor_id 
                 AND ep.name = 'MS_Description'
@@ -625,14 +630,14 @@ class SqlServerHandler(MetaDatabaseHandler):
                 NULL AS MOST_COMMON_FREQUENCIES,
                 CAST(h.min_value AS NVARCHAR(MAX)) AS MINIMUM_VALUE,
                 CAST(h.max_value AS NVARCHAR(MAX)) AS MAXIMUM_VALUE
-            FROM {self.database}.sys.tables t
-            INNER JOIN {self.database}.sys.schemas s 
+            FROM {self._quoted_database}.sys.tables t
+            INNER JOIN {self._quoted_database}.sys.schemas s 
                 ON t.schema_id = s.schema_id
-            INNER JOIN {self.database}.sys.columns c 
+            INNER JOIN {self._quoted_database}.sys.columns c 
                 ON t.object_id = c.object_id
-            LEFT JOIN {self.database}.sys.stats st
+            LEFT JOIN {self._quoted_database}.sys.stats st
                 ON st.object_id = t.object_id
-            LEFT JOIN {self.database}.sys.stats_columns sc
+            LEFT JOIN {self._quoted_database}.sys.stats_columns sc
                 ON sc.object_id = st.object_id 
                 AND sc.stats_id = st.stats_id
                 AND sc.column_id = c.column_id
@@ -642,7 +647,7 @@ class SqlServerHandler(MetaDatabaseHandler):
                     MIN(CAST(range_high_key AS NVARCHAR(MAX))) AS min_value,
                     MAX(CAST(range_high_key AS NVARCHAR(MAX))) AS max_value,
                     SUM(CAST(distinct_range_rows AS BIGINT)) + COUNT(*) AS distinct_count
-                FROM {self.database}.sys.dm_db_stats_histogram(st.object_id, st.stats_id)
+                FROM {self._quoted_database}.sys.dm_db_stats_histogram(st.object_id, st.stats_id)
                 WHERE st.object_id IS NOT NULL
             ) h
             WHERE s.name NOT IN ('sys', 'INFORMATION_SCHEMA')
@@ -670,8 +675,8 @@ class SqlServerHandler(MetaDatabaseHandler):
                 kcu.COLUMN_NAME as column_name,
                 kcu.ORDINAL_POSITION as ordinal_position,
                 tc.CONSTRAINT_NAME as constraint_name
-            FROM {self.database}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-            INNER JOIN {self.database}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+            FROM {self._quoted_database}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+            INNER JOIN {self._quoted_database}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
                 ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
                 AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
                 AND tc.TABLE_NAME = kcu.TABLE_NAME
@@ -707,12 +712,12 @@ class SqlServerHandler(MetaDatabaseHandler):
                 OBJECT_NAME(fk.parent_object_id) as child_table_name,
                 COL_NAME(fkc.parent_object_id, fkc.parent_column_id) as child_column_name,
                 fk.name as constraint_name
-            FROM {self.database}.sys.foreign_keys fk
-            INNER JOIN {self.database}.sys.foreign_key_columns fkc 
+            FROM {self._quoted_database}.sys.foreign_keys fk
+            INNER JOIN {self._quoted_database}.sys.foreign_key_columns fkc 
                 ON fk.object_id = fkc.constraint_object_id
-            INNER JOIN {self.database}.sys.tables t 
+            INNER JOIN {self._quoted_database}.sys.tables t 
                 ON fk.parent_object_id = t.object_id
-            INNER JOIN {self.database}.sys.schemas s 
+            INNER JOIN {self._quoted_database}.sys.schemas s 
                 ON t.schema_id = s.schema_id
             WHERE s.name NOT IN ('sys', 'INFORMATION_SCHEMA')
         """
