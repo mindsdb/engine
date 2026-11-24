@@ -64,7 +64,7 @@ jobs:
   trigger_deploy:
     if: github.actor != 'mindsdbadmin'
     needs: migrate
-    runs-on: mdb-dev
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
