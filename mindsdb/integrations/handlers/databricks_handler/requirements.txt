@@ -1,1 +1,2 @@
 databricks-sql-connector==4.2.3
+databricks-sqlalchemy==2.0.10

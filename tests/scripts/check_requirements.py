@@ -210,6 +210,7 @@ PACKAGE_NAME_MAP = {
     "pysqlite3": ["pysqlite3"],
     "atlassian-python-api": ["atlassian"],
     "databricks-sql-connector": ["databricks"],
+    "databricks-sqlalchemy": ["databricks"],
     "elasticsearch-dbapi": ["es"],
     "pygithub": ["github"],
     "python-gitlab": ["gitlab"],
