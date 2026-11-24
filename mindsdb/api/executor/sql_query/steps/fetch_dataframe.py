@@ -16,7 +16,7 @@ from mindsdb.api.executor.planner.step_result import Result
 from mindsdb.api.executor.exceptions import UnknownError
 from mindsdb.interfaces.query_context.context_controller import query_context_controller
 from mindsdb.integrations.utilities.query_traversal import query_traversal
-from mindsdb.integrations.libs.response import TableResponse
+from mindsdb.integrations.libs.response import TableResponse, OkResponse
 
 from .base import BaseStepCall
 
@@ -92,7 +92,9 @@ class FetchDataframeStepCall(BaseStepCall):
         if query is None:
             table_alias = (self.context.get("database"), "result", "result")
 
-            response: TableResponse = dn.query(step.raw_query, session=self.session)
+            response: TableResponse | OkResponse = dn.query(step.raw_query, session=self.session)
+            if isinstance(response, OkResponse):
+                return ResultSet(affected_rows=response.affected_rows)
             df = response.data_frame
         else:
             if isinstance(step.query, (Union, Intersect)):

@@ -305,8 +305,8 @@ class PostgresHandler(MetaDatabaseHandler):
 
     def native_query(self, query: str, params=None, stream: bool = True, **kwargs) -> DataHandlerResponse:
         """Executes a SQL query on the PostgreSQL database and returns the result.
-        NOTE: 'INSERT' (and may be some else) queries can not be executed on the server side,
-        but there are fallbackto client side execution.
+        NOTE: only SELECT and VALUES queries can be executed on the server side,
+        other queries fall back to client side execution.
 
         Args:
             query (str): The SQL query to be executed.
@@ -383,14 +383,10 @@ class PostgresHandler(MetaDatabaseHandler):
             try:
                 try:
                     cursor.execute(query)
-                except psycopg.errors.SyntaxError as e:
-                    # NOTE: INSERT queries cannot be executed server-side. When they fail, they produce a syntax error
-                    # that always starts with the text below, regardless of the INSERT query format.
-                    lower_e = str(e).lower()
-                    if not lower_e.startswith('syntax error at or near "insert"') and not lower_e.startswith(
-                        'syntax error at or near "drop"'
-                    ):
-                        raise
+                except (psycopg.errors.SyntaxError, psycopg.errors.FeatureNotSupported):
+                    # NOTE: a server-side cursor is created with 'DECLARE ... CURSOR FOR <query>', which accepts only
+                    # SELECT and VALUES. Any other statement (INSERT, UPDATE, CREATE, SHOW, EXPLAIN, etc) is rejected
+                    # before it runs, so it is safe to execute it again with a client side cursor.
                     connection.rollback()
                     return self._execute_client_side(query=query)
 

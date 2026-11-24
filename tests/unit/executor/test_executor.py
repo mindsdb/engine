@@ -1255,6 +1255,19 @@ class TestWithNativeQuery(BaseExecutorMockPredictor):
         assert mock_handler().native_query.call_args[0][0] == "select * from tasks"
         assert ret.data.to_lists()[0][0] == 3
 
+    @patch("mindsdb.integrations.handlers.postgres_handler.Handler")
+    def test_integration_native_query_without_result(self, mock_handler):
+        from mindsdb.integrations.libs.response import OkResponse
+
+        self.set_handler(mock_handler, name="pg", tables={})
+        mock_handler().native_query.side_effect = None
+        mock_handler().native_query.return_value = OkResponse(affected_rows=2)
+
+        ret = self.execute("select * from pg (update tasks set a = 1)")
+
+        assert mock_handler().native_query.call_args[0][0] == "update tasks set a = 1"
+        assert ret.data.to_lists() == []
+
     @pytest.mark.slow
     @patch("mindsdb.integrations.handlers.postgres_handler.Handler")
     def test_view_native_query(self, mock_handler):
