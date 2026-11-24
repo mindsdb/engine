@@ -221,11 +221,19 @@ class PostgresHandler(MetaDatabaseHandler):
             schema = self.connection_args.get("schema")
             if schema:
                 with self.connection.cursor() as cur:
+                    cur.execute("SELECT 1 FROM pg_namespace WHERE nspname = %s;", (schema,))
+                    if cur.fetchone() is None:
+                        raise psycopg.errors.InvalidSchemaName(
+                            f'Schema "{schema}" does not exist in database "{self.database}". '
+                            "Schema names are case-sensitive."
+                        )
                     cur.execute(f'SET search_path TO "{schema}", public;')
                 self.connection.commit()
             return self.connection
         except psycopg.Error as e:
             logger.error(f"Error connecting to PostgreSQL {self.database}, {e}!")
+            if self.is_connected:
+                self.connection.close()
             self.is_connected = False
             raise
 

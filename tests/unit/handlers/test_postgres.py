@@ -294,8 +294,34 @@ class TestPostgresHandler(BaseDatabaseHandlerTest, unittest.TestCase):
         self.assertTrue(self.handler.is_connected)
         self.assertIsNotNone(connection)
 
-        mock_cursor.execute.assert_called_once_with('SET search_path TO "my_schema", public;')
+        mock_cursor.execute.assert_called_with('SET search_path TO "my_schema", public;')
         self.mock_connect.return_value.commit.assert_called_once()
+
+    def test_connect_with_missing_schema_fails(self):
+        """
+        Tests that a schema that does not exist (for example, wrong case) fails the connection
+        instead of silently falling back to the public schema.
+        """
+        self.tearDown()
+        self.setUp()
+        self.handler.connection_args["schema"] = "sales"
+
+        mock_cursor = MockCursorContextManager()
+        mock_cursor.fetchone = MagicMock(return_value=None)
+        mock_conn = self.mock_connect.return_value
+        mock_conn.cursor.return_value = mock_cursor
+
+        with self.assertRaises(psycopg.errors.InvalidSchemaName) as ctx:
+            self.handler.connect()
+
+        self.assertIn('Schema "sales" does not exist', str(ctx.exception))
+        mock_cursor.execute.assert_called_once_with("SELECT 1 FROM pg_namespace WHERE nspname = %s;", ("sales",))
+        self.assertFalse(self.handler.is_connected)
+        mock_conn.close.assert_called_once()
+
+        response = self.handler.check_connection()
+        self.assertFalse(response.success)
+        self.assertIn('Schema "sales" does not exist', response.error_message)
 
     def test_make_connection_args_applies_overrides(self):
         handler = self.handler
